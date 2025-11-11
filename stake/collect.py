@@ -13,15 +13,36 @@ OUT = os.path.join(ROOT, "data", "stake_snapshots")
 
 os.makedirs(OUT, exist_ok=True)
 
-DROPBOX_TOKEN = os.getenv("DROPBOX_TOKEN")
-dbx = dropbox.Dropbox(DROPBOX_TOKEN) if DROPBOX_TOKEN else None
+# ======================================================
+# Dropbox Auth (supports refresh token + fallback)
+# ======================================================
+DROPBOX_APP_KEY = os.getenv("DROPBOX_APP_KEY")
+DROPBOX_APP_SECRET = os.getenv("DROPBOX_APP_SECRET")
+DROPBOX_REFRESH_TOKEN = os.getenv("DROPBOX_REFRESH_TOKEN")
+DROPBOX_ACCESS_TOKEN = os.getenv("DROPBOX_TOKEN")  # legacy fallback
+
+dbx = None
+if DROPBOX_REFRESH_TOKEN and DROPBOX_APP_KEY and DROPBOX_APP_SECRET:
+    # Preferred: refreshable token
+    dbx = dropbox.Dropbox(
+        oauth2_refresh_token=DROPBOX_REFRESH_TOKEN,
+        app_key=DROPBOX_APP_KEY,
+        app_secret=DROPBOX_APP_SECRET,
+    )
+    print("✅ Dropbox via refresh token")
+elif DROPBOX_ACCESS_TOKEN:
+    # Legacy: short-lived access token
+    dbx = dropbox.Dropbox(DROPBOX_ACCESS_TOKEN)
+    print("⚠ Dropbox via legacy access token (WILL EXPIRE)")
+else:
+    print("⚠ No Dropbox credentials found — uploads disabled")
 
 
-# -------------------------------
+# ======================================================
 # Weather logic (Open-Meteo)
-# -------------------------------
+# ======================================================
 def get_snow_forecast(lat, lon):
-    """Return (3h_snow_in, 6h_snow_in)"""
+    """Return (3h_snow_in, 6h_snow_in)."""
     url = (
         "https://api.open-meteo.com/v1/forecast?"
         f"latitude={lat}&longitude={lon}"
@@ -50,11 +71,11 @@ def get_snow_forecast(lat, lon):
     return (next3, next6)
 
 
-# -------------------------------
+# ======================================================
 # Cropping helper
-# -------------------------------
+# ======================================================
 def apply_crop(img_bytes, crop):
-    """Return cropped JPEG bytes"""
+    """Return cropped JPEG bytes."""
     if not crop:
         return img_bytes
 
@@ -69,11 +90,11 @@ def apply_crop(img_bytes, crop):
         return img_bytes
 
 
-# -------------------------------
+# ======================================================
 # Dropbox last image reference
-# -------------------------------
+# ======================================================
 def get_latest_dropbox_image(name):
-    """Returns bytes of most recent Dropbox image for this mountain, else None"""
+    """Returns bytes of most recent Dropbox image for this mountain, else None."""
     if not dbx:
         return None
 
@@ -102,9 +123,9 @@ def get_latest_dropbox_image(name):
         return None
 
 
-# -------------------------------
+# ======================================================
 # pHash + diff
-# -------------------------------
+# ======================================================
 def get_phash(image_bytes):
     try:
         img = Image.open(BytesIO(image_bytes))
@@ -122,7 +143,6 @@ def is_meaningfully_different(new_bytes, name, crop):
     if old_bytes is None:
         return True   # no reference
 
-    # crop both
     new_bytes = apply_crop(new_bytes, crop)
     old_bytes = apply_crop(old_bytes, crop)
 
@@ -136,12 +156,12 @@ def is_meaningfully_different(new_bytes, name, crop):
     return diff > 3       # threshold
 
 
-# -------------------------------
+# ======================================================
 # Dropbox Upload
-# -------------------------------
+# ======================================================
 def upload_dropbox(local_path, name):
     if dbx is None:
-        print("⚠ No Dropbox token configured, skipping upload.")
+        print("⚠ No Dropbox configured, skipping upload.")
         return
 
     remote_folder = f"/powalert/{name}"
@@ -159,23 +179,23 @@ def upload_dropbox(local_path, name):
         print(f"❌ Upload failed → {e}")
 
 
-# -------------------------------
+# ======================================================
 # Main
-# -------------------------------
+# ======================================================
 def main():
     with open(CFG) as f:
         sources = json.load(f)
 
     for src in sources:
         name = src["name"]
-        url  = src["snapshot_url"]
-        lat  = src.get("lat")
-        lon  = src.get("lon")
+        url = src["snapshot_url"]
+        lat = src.get("lat")
+        lon = src.get("lon")
         crop = src.get("crop")
 
         capture = False
 
-        # ---- Weather ----
+        # Weather gate
         if lat and lon:
             next3, next6 = get_snow_forecast(lat, lon)
             print(name, "→ next3:", next3, "in   next6:", next6, "in")
@@ -183,7 +203,7 @@ def main():
             if next3 >= 0.25 or next6 >= 1.0:
                 capture = True
 
-        # ---- Always pull snapshot ----
+        # Always fetch snapshot
         try:
             r = requests.get(url, timeout=10, verify=False)
             img_bytes = r.content
@@ -191,13 +211,13 @@ def main():
             print(f"⚠ {name}: fetch failed")
             continue
 
-        # ---- Visual difference gate ----
+        # Visual-diff gate
         if not capture:
             if not is_meaningfully_different(img_bytes, name, crop):
                 print(f"⏭ {name}: skipped (visually same)")
                 continue
 
-        # ---- Save ----
+        # Save locally
         folder = os.path.join(OUT, name)
         os.makedirs(folder, exist_ok=True)
 
