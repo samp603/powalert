@@ -3,7 +3,7 @@ name: Collect Snow Stake Images
 on:
   schedule:
     - cron: "*/30 * * * *"   # every 30 minutes
-  workflow_dispatch:        # allow manual run
+  workflow_dispatch:
 
 jobs:
   collect:
@@ -26,6 +26,6 @@ jobs:
       - name: Run stake collector
         env:
           GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
-          GOOGLE_CREDS: ${{ secrets.GOOGLE_CREDS }}
+          GDRIVE_KEY: ${{ secrets.GDRIVE_KEY }}
         run: |
           python scraper/collect.py
