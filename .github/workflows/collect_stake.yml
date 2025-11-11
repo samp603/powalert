@@ -28,4 +28,4 @@ jobs:
           GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
           GDRIVE_KEY: ${{ secrets.GDRIVE_KEY }}
         run: |
-          python scraper/collect.py
+          python stake/collect.py
