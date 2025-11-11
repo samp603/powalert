@@ -21,11 +21,10 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests google-api-python-client google-auth-httplib2 google-auth-oauthlib
+          pip install requests dropbox
 
       - name: Run stake collector
         env:
-          GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
-          GDRIVE_KEY: ${{ secrets.GDRIVE_KEY }}
+          DROPBOX_TOKEN: ${{ secrets.DROPBOX_TOKEN }}
         run: |
           python stake/collect.py
