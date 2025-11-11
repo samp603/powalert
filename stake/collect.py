@@ -1,4 +1,3 @@
-# stake/collect.py
 import os
 import requests
 import dropbox
@@ -16,7 +15,6 @@ os.makedirs(OUT, exist_ok=True)
 
 DROPBOX_TOKEN = os.getenv("DROPBOX_TOKEN")
 dbx = dropbox.Dropbox(DROPBOX_TOKEN) if DROPBOX_TOKEN else None
-
 
 # -------------------------------
 # Weather logic (Open-Meteo)
@@ -42,7 +40,6 @@ def get_snow_forecast(lat, lon):
     if not snowfall or not times:
         return (0, 0)
 
-    # snowfall is in cm → convert to inches
     def cm_to_in(x):
         return (x or 0) / 2.54
 
@@ -53,7 +50,40 @@ def get_snow_forecast(lat, lon):
 
 
 # -------------------------------
-# Perceptual difference check
+# Dropbox last image pHash reference
+# -------------------------------
+def get_latest_dropbox_image(name):
+    """Returns bytes of most recent Dropbox image for this mountain, else None"""
+    if not dbx:
+        return None
+
+    folder = f"/powalert/{name}"
+
+    try:
+        res = dbx.files_list_folder(folder)
+    except:
+        return None
+
+    files = [
+        entry for entry in res.entries
+        if isinstance(entry, dropbox.files.FileMetadata)
+    ]
+
+    if not files:
+        return None
+
+    files.sort(key=lambda f: f.client_modified, reverse=True)
+    latest = files[0]
+
+    try:
+        metadata, response = dbx.files_download(latest.path_lower)
+        return response.content
+    except:
+        return None
+
+
+# -------------------------------
+# pHash + diff
 # -------------------------------
 def get_phash(image_bytes):
     try:
@@ -63,45 +93,32 @@ def get_phash(image_bytes):
         return None
 
 
-def is_new_image(name, new_bytes):
-    """
-    Compare against most recent local copy via pHash.
-    If very similar, skip.
-    """
-    folder = os.path.join(OUT, name)
-    if not os.path.exists(folder):
-        return True
-
-    files = sorted([f for f in os.listdir(folder) if f.endswith(".jpg")])
-    if not files:
-        return True
-
-    last_path = os.path.join(folder, files[-1])
-    with open(last_path, "rb") as f:
-        old_bytes = f.read()
+def is_meaningfully_different(new_bytes, name):
+    """Compare against newest Dropbox image."""
+    old_bytes = get_latest_dropbox_image(name)
+    if old_bytes is None:
+        return True  # nothing to compare against — keep it
 
     old_hash = get_phash(old_bytes)
     new_hash = get_phash(new_bytes)
 
     if not old_hash or not new_hash:
-        return True
+        return True  # can’t compare — keep just in case
 
-    # hamming distance
     diff = old_hash - new_hash
-
-    # If images differ enough → keep
-    return diff > 3   # small difference = likely identical
+    # Higher threshold lowers sensitivity; 3–5 is reasonable
+    return diff > 3
 
 
 # -------------------------------
 # Dropbox Upload
 # -------------------------------
-def upload_dropbox(local_path, folder_name):
+def upload_dropbox(local_path, name):
     if dbx is None:
         print("⚠ No Dropbox token configured, skipping upload.")
         return
 
-    remote_folder = f"/powalert/{folder_name}"
+    remote_folder = f"/powalert/{name}"
     remote_file = f"{remote_folder}/{os.path.basename(local_path)}"
 
     try:
@@ -125,21 +142,22 @@ def main():
 
     for src in sources:
         name = src["name"]
-        url = src["snapshot_url"]
-        lat = src.get("lat")
-        lon = src.get("lon")
+        url  = src["snapshot_url"]
+        lat  = src.get("lat")
+        lon  = src.get("lon")
 
-        # ---- Weather gate ----
         capture = False
 
+        # Weather check
         if lat and lon:
             next3, next6 = get_snow_forecast(lat, lon)
             print(name, "→ next3:", next3, "in   next6:", next6, "in")
 
+            # meaningfully snowy?
             if next3 >= 0.25 or next6 >= 1.0:
                 capture = True
 
-        # ---- Pull snapshot regardless, so we can compute pHash ----
+        # always download raw
         try:
             r = requests.get(url, timeout=10, verify=False)
             img_bytes = r.content
@@ -147,19 +165,14 @@ def main():
             print(f"⚠ {name}: fetch failed")
             continue
 
-        # pHash rule (store if meaningfully different)
-        if is_new_image(name, img_bytes):
+        # pHash decide
+        if is_meaningfully_different(img_bytes, name):
             capture = True
-
-        # Always capture if folder doesn’t exist yet
-        if not os.path.exists(os.path.join(OUT, name)):
-            capture = True
-
-        if not capture:
-            print(f"⏭ {name}: skipped (no snow + looks same)")
+        else:
+            print(f"⏭ {name}: skipped (visually same)")
             continue
 
-        # Save image
+        # Store locally
         folder = os.path.join(OUT, name)
         os.makedirs(folder, exist_ok=True)
 
