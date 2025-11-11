@@ -3,24 +3,28 @@
     "name": "Okemo",
     "snapshot_url": "https://player.brownrice.com/snapshot/okemosnowstake",
     "lat": 43.4037,
-    "lon": -72.7176
+    "lon": -72.7176,
+    "crop": [1067, 230, 1255, 1018]
   },
   {
     "name": "Wildcat",
     "snapshot_url": "https://player.brownrice.com/snapshot/wildcat3.jpg",
     "lat": 44.2585,
-    "lon": -71.2254
+    "lon": -71.2254,
+    "crop": [479, 99, 660, 615]
   },
   {
     "name": "Stowe",
     "snapshot_url": "https://streamer4.brownrice.com/cam-images/stowesnowstake.jpg",
     "lat": 44.5294,
-    "lon": -72.7792
+    "lon": -72.7792,
+    "crop": [481, 81, 704, 664]
   },
   {
     "name": "Attitash",
     "snapshot_url": "https://streamer6.brownrice.com/cam-images/attitash4.jpg",
     "lat": 44.0781,
-    "lon": -71.2289
+    "lon": -71.2289,
+    "crop": [480, 252, 855, 623]
   }
 ]

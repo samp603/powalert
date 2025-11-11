@@ -16,6 +16,7 @@ os.makedirs(OUT, exist_ok=True)
 DROPBOX_TOKEN = os.getenv("DROPBOX_TOKEN")
 dbx = dropbox.Dropbox(DROPBOX_TOKEN) if DROPBOX_TOKEN else None
 
+
 # -------------------------------
 # Weather logic (Open-Meteo)
 # -------------------------------
@@ -50,7 +51,26 @@ def get_snow_forecast(lat, lon):
 
 
 # -------------------------------
-# Dropbox last image pHash reference
+# Cropping helper
+# -------------------------------
+def apply_crop(img_bytes, crop):
+    """Return cropped JPEG bytes"""
+    if not crop:
+        return img_bytes
+
+    x1, y1, x2, y2 = crop
+    try:
+        img = Image.open(BytesIO(img_bytes))
+        cropped = img.crop((x1, y1, x2, y2))
+        buf = BytesIO()
+        cropped.save(buf, format="JPEG")
+        return buf.getvalue()
+    except:
+        return img_bytes
+
+
+# -------------------------------
+# Dropbox last image reference
 # -------------------------------
 def get_latest_dropbox_image(name):
     """Returns bytes of most recent Dropbox image for this mountain, else None"""
@@ -93,21 +113,27 @@ def get_phash(image_bytes):
         return None
 
 
-def is_meaningfully_different(new_bytes, name):
-    """Compare against newest Dropbox image."""
+def is_meaningfully_different(new_bytes, name, crop):
+    """
+    Compare against newest Dropbox image,
+    cropping both images before hashing.
+    """
     old_bytes = get_latest_dropbox_image(name)
     if old_bytes is None:
-        return True  # nothing to compare against — keep it
+        return True   # no reference
+
+    # crop both
+    new_bytes = apply_crop(new_bytes, crop)
+    old_bytes = apply_crop(old_bytes, crop)
 
     old_hash = get_phash(old_bytes)
     new_hash = get_phash(new_bytes)
 
     if not old_hash or not new_hash:
-        return True  # can’t compare — keep just in case
+        return True   # can't compare → keep
 
     diff = old_hash - new_hash
-    # Higher threshold lowers sensitivity; 3–5 is reasonable
-    return diff > 3
+    return diff > 3       # threshold
 
 
 # -------------------------------
@@ -145,19 +171,19 @@ def main():
         url  = src["snapshot_url"]
         lat  = src.get("lat")
         lon  = src.get("lon")
+        crop = src.get("crop")
 
         capture = False
 
-        # Weather check
+        # ---- Weather ----
         if lat and lon:
             next3, next6 = get_snow_forecast(lat, lon)
             print(name, "→ next3:", next3, "in   next6:", next6, "in")
 
-            # meaningfully snowy?
             if next3 >= 0.25 or next6 >= 1.0:
                 capture = True
 
-        # always download raw
+        # ---- Always pull snapshot ----
         try:
             r = requests.get(url, timeout=10, verify=False)
             img_bytes = r.content
@@ -165,14 +191,13 @@ def main():
             print(f"⚠ {name}: fetch failed")
             continue
 
-        # pHash decide
-        if is_meaningfully_different(img_bytes, name):
-            capture = True
-        else:
-            print(f"⏭ {name}: skipped (visually same)")
-            continue
+        # ---- Visual difference gate ----
+        if not capture:
+            if not is_meaningfully_different(img_bytes, name, crop):
+                print(f"⏭ {name}: skipped (visually same)")
+                continue
 
-        # Store locally
+        # ---- Save ----
         folder = os.path.join(OUT, name)
         os.makedirs(folder, exist_ok=True)
 
