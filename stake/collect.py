@@ -1,108 +1,68 @@
-# stake/collect.py
 import os
-import json
 import requests
-from datetime import datetime
-from google.oauth2.service_account import Credentials
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
+import dropbox
+from datetime import datetime, UTC
+import json
 
 ROOT = os.path.dirname(os.path.dirname(__file__))
 CFG = os.path.join(ROOT, "stake", "stake_sources.json")
-LOCAL_DIR = os.path.join(ROOT, "data", "stake_snapshots")
+OUT = os.path.join(ROOT, "data", "stake_snapshots")
 
-os.makedirs(LOCAL_DIR, exist_ok=True)
+os.makedirs(OUT, exist_ok=True)
 
-# === Load Drive creds ===
-GDRIVE_FOLDER_ID = os.getenv("GDRIVE_FOLDER_ID")
-GDRIVE_KEY = os.getenv("GDRIVE_KEY")
-
-if not GDRIVE_FOLDER_ID or not GDRIVE_KEY:
-    raise RuntimeError("❌ Missing GDRIVE_FOLDER_ID or GDRIVE_KEY secrets")
-
-creds = Credentials.from_service_account_info(
-    json.loads(GDRIVE_KEY),
-    scopes=["https://www.googleapis.com/auth/drive"]
-)
-
-drive = build("drive", "v3", credentials=creds)
+DROPBOX_TOKEN = os.getenv("DROPBOX_TOKEN")
+dbx = dropbox.Dropbox(DROPBOX_TOKEN) if DROPBOX_TOKEN else None
 
 
-# === Drive Helpers ===
-def get_or_create_folder(parent_id: str, name: str) -> str:
-    query = (
-        f"mimeType='application/vnd.google-apps.folder' "
-        f"and trashed=false and name='{name}' and '{parent_id}' in parents"
-    )
-    res = drive.files().list(q=query, fields="files(id)").execute()
-    files = res.get("files", [])
-
-    if files:
-        return files[0]["id"]
-
-    metadata = {
-        "name": name,
-        "parents": [parent_id],
-        "mimeType": "application/vnd.google-apps.folder",
-    }
-    folder = drive.files().create(body=metadata, fields="id").execute()
-    return folder["id"]
-
-
-def upload_to_drive(local_path: str, resort: str):
-    date_folder = datetime.now().strftime("%Y-%m-%d")
-    resort_folder_id = get_or_create_folder(GDRIVE_FOLDER_ID, resort)
-    date_folder_id = get_or_create_folder(resort_folder_id, date_folder)
-
-    fname = os.path.basename(local_path)
-    media = MediaFileUpload(local_path, mimetype="image/jpeg")
-
-    drive.files().create(
-        body={"name": fname, "parents": [date_folder_id]},
-        media_body=media,
-    ).execute()
-
-    print(f"📁 Uploaded → Drive: {resort}/{date_folder}/{fname}")
-
-
-def fetch_and_save(resort: dict):
-    name = resort["name"]
-    url = resort.get("snapshot_url")
-
-    if not url:
-        print(f"⚠ Missing snapshot_url for {name}")
+def upload_dropbox(local_path, folder_name):
+    if dbx is None:
+        print("⚠ No Dropbox token configured, skipping upload.")
         return
 
-    timestamp = datetime.now().strftime("%Y%m%d%H%M")
-    fname = f"{name}_{timestamp}.jpg"
-    local_path = os.path.join(LOCAL_DIR, fname)
+    # Folder inside Dropbox
+    remote_folder = f"/powalert/{folder_name}"
+    remote_file = f"{remote_folder}/{os.path.basename(local_path)}"
 
     try:
-        r = requests.get(url, timeout=12, verify=False)
-        if r.status_code != 200:
-            print(f"⚠ {name}: HTTP {r.status_code}")
-            return
+        # Ensure folder exists — Dropbox auto-creates on upload
+        with open(local_path, "rb") as f:
+            dbx.files_upload(
+                f.read(),
+                remote_file,
+                mode=dropbox.files.WriteMode.overwrite
+            )
+        print(f"✅ Uploaded → {remote_file}")
     except Exception as e:
-        print(f"⚠ {name}: fetch failed -> {e}")
-        return
-
-    with open(local_path, "wb") as f:
-        f.write(r.content)
-
-    print(f"✅ Saved: {local_path}")
-
-    try:
-        upload_to_drive(local_path, name)
-    except Exception as e:
-        print(f"❌ Upload failed for {name}: {e}")
+        print(f"❌ Upload failed → {e}")
 
 
 def main():
     with open(CFG) as f:
-        resorts = json.load(f)
+        sources = json.load(f)
 
-    for r in resorts:
-        fetch_and_save(r)
+    for src in sources:
+        name = src["name"]
+        url = src["snapshot_url"]
+
+        try:
+            r = requests.get(url, timeout=10, verify=False)  # SSL workaround
+        except Exception as e:
+            print(f"⚠ {name}: fetch failed → {e}")
+            continue
+
+        if r.status_code != 200:
+            print(f"⚠ {name}: snapshot HTTP {r.status_code}")
+            continue
+
+        fname = f"{name}_{datetime.now(UTC).strftime('%Y%m%d%H%M')}.jpg"
+        local_path = os.path.join(OUT, fname)
+
+        with open(local_path, "wb") as f:
+            f.write(r.content)
+
+        print(f"✅ Saved: {local_path}")
+
+        upload_dropbox(local_path, name)
 
 
 if __name__ == "__main__":
