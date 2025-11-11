@@ -8,7 +8,7 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
 ROOT = os.path.dirname(os.path.dirname(__file__))
-CFG = os.path.join(ROOT, "config", "epic_resorts.json")
+CFG = os.path.join(ROOT, "stake", "stake_sources.json")
 LOCAL_DIR = os.path.join(ROOT, "data", "stake_snapshots")
 
 os.makedirs(LOCAL_DIR, exist_ok=True)
