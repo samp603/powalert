@@ -26,5 +26,12 @@
     "lat": 44.0781,
     "lon": -71.2289,
     "crop": [480, 252, 855, 623]
+  },
+  {
+    "name": "Mount Snow",
+    "snapshot_url": "https://live8p.brownrice.com/cam-images/mountsnowsnowstake.jpg",
+    "lat": 42.9625,
+    "lon": -72.8825,
+    "crop": [909, 90, 1128, 1048]
   }
 ]
